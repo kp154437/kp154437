@@ -81,4 +81,4 @@ This project is optimized for deployment on **Vercel**.
 
 ---
 
-Built with ❤️ by the AspectEd Team.
+Built with ❤️ by the ksp Team.
