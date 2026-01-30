@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Upload, FileText, Loader2, CloudLightning } from 'lucide-react';
-import { processDocumentWithGemini } from '@/app/actions';
+// import { processDocumentWithGemini } from '@/app/actions'; // Removed
 
 interface UploadZoneProps {
     onUploadComplete: (result: any) => void;
@@ -12,35 +12,32 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
     const [isProcessing, setIsProcessing] = useState(false);
     const [dragActive, setDragActive] = useState(false);
 
-    const fileToBase64 = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => {
-                const result = reader.result as string;
-                const base64 = result.split(',')[1];
-                resolve(base64);
-            };
-            reader.onerror = error => reject(error);
-        });
-    };
-
     const processFile = async (file: File) => {
         if (!file) return;
         setIsProcessing(true);
 
         try {
-            const base64 = await fileToBase64(file);
-            const result = await processDocumentWithGemini(base64, file.type, file.name);
+            const formData = new FormData();
+            formData.append('file', file);
 
-            if (result.error) {
-                console.error(result.error);
-                alert("Error: " + result.error);
+            // Replaced Server Action with API Route
+            const response = await fetch('/api/process-document', {
+                method: 'POST',
+                body: formData,
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || result.error) {
+                const errorMsg = result.error || response.statusText;
+                console.error(errorMsg);
+                alert("Error: " + errorMsg);
             } else {
                 onUploadComplete(result);
             }
         } catch (e) {
             console.error("Upload failed", e);
+            alert("Upload failed. Check console.");
         } finally {
             setIsProcessing(false);
         }

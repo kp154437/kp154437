@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Sparkles, Paperclip, X, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { AedaFirestoreRecord, generateFirestorePayload } from '@/lib/aeda-protocol';
-import { chatWithGemini, processDocumentWithGemini } from '@/app/actions';
+import { chatWithGemini } from '@/app/actions'; // processDocumentWithGemini removed
 import { db } from '@/lib/firebase';
 import { collection, addDoc } from "firebase/firestore";
 
@@ -48,15 +48,6 @@ export function ChatInterface({ onInteractionComplete, baseContext = "" }: ChatI
         }
     };
 
-    const fileToBase64 = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve((reader.result as string).split(',')[1]);
-            reader.onerror = reject;
-        });
-    };
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim() && !attachment) return;
@@ -79,10 +70,19 @@ export function ChatInterface({ onInteractionComplete, baseContext = "" }: ChatI
             let aiPrompt = userMsg.content;
 
             if (currentAttachment) {
-                const base64 = await fileToBase64(currentAttachment);
-                const docResult = await processDocumentWithGemini(base64, currentAttachment.type, currentAttachment.name);
-                if (docResult.full_extraction) {
+                const formData = new FormData();
+                formData.append('file', currentAttachment);
+
+                // Use API Route instead of Server Action
+                const response = await fetch('/api/process-document', { method: 'POST', body: formData });
+                const docResult = await response.json();
+
+                if (response.ok && docResult.full_extraction) {
                     aiPrompt = `[User attached a file named ${currentAttachment.name}. Content: ${docResult.full_extraction}]\n\nQuestion: ${userMsg.content}`;
+                } else {
+                    console.error("Document processing failed. Status:", response.status, "Result:", JSON.stringify(docResult));
+                    alert(`Processing Error: ${docResult.error || "Unknown error"}`);
+                    aiPrompt = `[User attached a file ${currentAttachment.name} but processing failed]. Question: ${userMsg.content}`;
                 }
             }
 

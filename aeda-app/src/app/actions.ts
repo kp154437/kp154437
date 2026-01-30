@@ -11,15 +11,28 @@ const apiKey = process.env.GOOGLE_API_KEY || "";
 const genAI = new GoogleGenerativeAI(apiKey);
 const fileManager = new GoogleAIFileManager(apiKey);
 
-export async function processDocumentWithGemini(fileBase64: string, mimeType: string, fileName: string) {
+export async function processDocumentWithGemini(formData: FormData) {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const file = formData.get('file') as File;
+        if (!file) throw new Error("No file uploaded");
 
-        // Calculate size: Base64 string length * 0.75 = approximate bytes
-        const sizeInBytes = fileBase64.length * 0.75;
+        const fileName = file.name;
+        const mimeType = file.type;
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const fileBase64 = buffer.toString('base64');
+
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+
+        // Calculate size: Buffer length is exact bytes
+        const sizeInBytes = buffer.length;
         const sizeInMB = sizeInBytes / (1024 * 1024);
 
         console.log(`Processing ${fileName}: ${sizeInMB.toFixed(2)} MB`);
+
+        if (sizeInBytes === 0) {
+            throw new Error("File is empty (0 bytes)");
+        }
 
         let inputPart;
 
@@ -28,7 +41,6 @@ export async function processDocumentWithGemini(fileBase64: string, mimeType: st
             console.log("File > 18MB, using File API upload...");
 
             // 1. Write temp file
-            const buffer = Buffer.from(fileBase64, 'base64');
             const tempPath = path.join(os.tmpdir(), `aeda_${Date.now()}_${fileName}`);
             await writeFile(tempPath, buffer);
 
@@ -101,31 +113,62 @@ export async function processDocumentWithGemini(fileBase64: string, mimeType: st
         try {
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
-                return JSON.parse(jsonMatch[0]);
+                const parsed = JSON.parse(jsonMatch[0]);
+                // Ensure no deep nesting/circular
+                return JSON.parse(JSON.stringify(parsed));
             }
             throw new Error("No JSON found");
         } catch (e) {
             // Fallback if AI didn't output strict JSON
-            return {
+            const cleanResult = {
                 summary: "Extracted Content",
                 full_extraction: text,
                 keywords: ["Document", "General"],
                 subject: "General",
                 topic: fileName
             };
+            return JSON.parse(JSON.stringify(cleanResult));
         }
 
-    } catch (error) {
-        console.error("Gemini Error:", error);
-        return { error: "Failed to process document. Ensure GOOGLE_API_KEY is set." };
+    } catch (error: any) {
+        console.error("Server Action Failed:", error.message);
+        return { error: `Processing Failed: ${error.message}` };
     }
 }
 
+import { chatWithOllama } from '@/lib/ollama-client';
+import { chatWithGroq } from '@/lib/groq-client';
+
 export async function chatWithGemini(history: any[], newMessage: string, context: string) {
+    // Check Provider
+    const provider = process.env.NEXT_PUBLIC_AI_PROVIDER || 'gemini';
+
+    if (provider === 'groq') {
+        try {
+            // Groq Llama 3.3
+            const systemPrompt = `You are an expert tutor. Context: ${context.slice(0, 5000)}`;
+            return await chatWithGroq(history, systemPrompt);
+        } catch (e) {
+            console.error(e);
+            return "Groq Error: Check GROQ_API_KEY in .env.local";
+        }
+    }
+
+    if (provider === 'ollama') {
+        try {
+            const systemPrompt = `You are an expert tutor. Context: ${context.slice(0, 3000)}`;
+            return await chatWithOllama('mistral', history, systemPrompt);
+        } catch (e) {
+            console.error(e);
+            return "Ollama Error: Ensure Ollama is running and 'mistral' is pulled.";
+        }
+    }
+
+    // Default: Gemini
     try {
         // We use gemini-pro (text-only) for the chat turns if no images are passed in this specific turn
         // Or we can use flash if we want to be fast.
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
         const systemPrompt = `
       Pretend you are an expert tutor.
